@@ -1,0 +1,502 @@
+<!-- course: COMP 4710 Senior Design, Spring 2024 -->
+<!-- author: Cady Pridgeon -->
+<!-- credits:
+    https://observablehq.com/@d3/zoomable-sunburst?intent=fork -->
+
+<!DOCTYPE html>
+<html>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<script src="https://d3js.org/d3.v7.min.js"></script>
+
+<head>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700"
+        rel="stylesheet">
+</head>
+
+<body>
+
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        strong {
+            font-weight: 600;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-family: "Crimson Text", serif;
+            font-weight: 700;
+            font-style: normal;
+            line-height: 0;
+        }
+
+        select {
+            font-family: "Crimson Text", serif;
+            font-weight: 400;
+            font-style: normal;
+            font-size: 1rem;
+            padding: .25rem .5rem .25rem .5rem;
+        }
+
+        #header-container {
+            display: flex;
+            flex-direction: column;
+            align-items: start;
+            padding-top: 2rem;
+            padding-left: 4rem;
+            padding-right: 4rem;
+            gap: 1rem;
+        }
+
+        #data-container {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+
+        #select-container {
+            display: flex;
+            flex-direction: row;
+            gap: 2rem;
+        }
+
+        .dropdown {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: .5rem;
+            font-size: 1rem;
+            font-family: "Crimson Text", serif;
+            font-weight: 600;
+            font-style: normal;
+            line-height: 0;
+        }
+
+        #count {
+            font-family: "Crimson Text", serif;
+            font-weight: 400;
+            font-style: normal;
+            font-size: 1rem;
+        }
+
+        #chronology {
+            height: 64vh;
+            overflow-y: hidden;
+            overflow-x: hidden;
+
+        }
+
+        #bottom-axis {
+            padding-top: 0px;
+
+        }
+
+        .tooltip {
+            position: absolute;
+            text-align: left;
+            padding: 8px;
+            font: 12px sans-serif;
+            background: #fff;
+            border-radius: 4px;
+            box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
+            pointer-events: none;
+        }
+    </style>
+
+    <div id="header-container">
+        <h1>Alabama Authors Chronology</h1>
+        <div id="data-container">
+
+            <div id="count"></div>
+
+            <div id="select-container">
+                <div id="sort-container" class="dropdown">
+                    <p>Sort By</p>
+                    <div id="sort"></div>
+                </div>
+                <div id="filter-container" class="dropdown">
+                    <p>Filter By</p>
+                    <div id="filter"></div>
+                </div>
+                <div id="view-container" class="dropdown">
+                    <p>View</p>
+                    <div id="view"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <svg id="top-axis"></svg>
+    <div id="chronology"></div>
+    <svg id="bottom-axis"></svg>
+    <div class="tooltip" style="opacity: 0;"></div>
+
+    <script>
+        var sortDropdown = document.getElementById("sort");
+        var sort = ["Alphabetically", "Ascending Birth Year", "Descending Birth Year", "Ascending Death Year", "Descending Death Year", "Ascending Lifespan", "Descending Lifespan"];
+        d3.select(sortDropdown)
+            .append("span")
+            .append("select")
+            .attr("id", "sort-selection")
+            .selectAll("option")
+            .data(sort)
+            .enter()
+            .append("option")
+            .attr("value", d => d)
+            .text(d => d);
+
+        var filterDropdown = document.getElementById("filter");
+        var filter = ["All Authors", "Authors With Links", "Authors With Images", "Authors With Links and Images"];
+        d3.select(filterDropdown)
+            .append("span")
+            .append("select")
+            .attr("id", "filter-selection")
+            .selectAll("option")
+            .data(filter)
+            .enter()
+            .append("option")
+            .attr("value", d => d)
+            .text(d => d);
+
+        function resetSortDropdown() {
+            document.getElementById("sort-selection").selectedIndex = 0;
+        }
+
+        function resetFilterDropdown() {
+            document.getElementById("filter-selection").selectedIndex = 0;
+        }
+
+        var csv = "export.csv";
+        var viewDropdown = document.getElementById("view");
+        var viewOptions = ["150", "1700"];
+        d3.select(viewDropdown)
+            .append("span")
+            .append("select")
+            .attr("id", "view-selection")
+            .selectAll("option")
+            .data(viewOptions)
+            .enter()
+            .append("option")
+            .attr("value", d => d)
+            .text(d => d);
+
+        d3.select("#view-selection").on("change", function () {
+            var selectedView = d3.select(this).node().value;
+            if (selectedView == "150") {
+                csv = "export.csv";
+            } else if (selectedView == "1700") {
+                csv = "authors.csv";
+            }
+            resetSortDropdown();
+            resetFilterDropdown();
+            processData();
+        });
+        processData();
+
+        function processData() {
+
+            // import data from export.csv and convert date into death year, birth year, and lifespan
+            d3.csv(csv).then(function (data) {
+                data = data.filter(function (d) {
+                    var years = d["Dublin Core:Date"].split("-");
+                    var birthYear = parseInt(years[0]);
+                    var deathYear = years[1];
+
+                    // skip entries that have an unknown death year
+                    if (deathYear === "unknown") {
+                        return false;
+                    }
+
+                    // make the year the current year if the death year is listed as present
+                    if (deathYear === "present") {
+                        deathYear = new Date().getFullYear();
+                    }
+                    else {
+                        deathYear = parseInt(years[1]);
+                    }
+
+                    d.birth_year = new Date(birthYear, 0, 1);
+                    d.death_year = new Date(deathYear, 0, 1);
+                    d.lifespan = parseInt(deathYear) - parseInt(birthYear);
+
+                    return true;
+                });
+
+                // create sort dropdown
+                // credit: https://dev.to/learningmonk/sortable-bar-chart-with-d3-js-k3b
+
+
+                data.sort((a, b) => {
+                    return d3.ascending(String(a["Dublin Core:Title"]), String(b["Dublin Core:Title"]))
+                });
+
+                document.addEventListener("DOMContentLoaded", createChronology());
+                createChronology();
+
+
+                // sort data based on dropdown selection
+                d3.select("#sort-selection").on("change", function () {
+                    var selected = d3.select(this).node().value;
+                    if (selected == "Alphabetically") {
+                        data.sort((a, b) => {
+                            return d3.ascending(String(a["Dublin Core:Title"]), String(b["Dublin Core:Title"]))
+                        })
+                        console.log(data)
+                    } else if (selected == "Ascending Birth Year") {
+                        data.sort((a, b) => {
+                            return d3.ascending(a.birth_year, b.birth_year)
+                        })
+                    } else if (selected == "Descending Birth Year") {
+                        data.sort((a, b) => {
+                            return d3.descending(a.birth_year, b.birth_year)
+                        })
+                    } else if (selected == "Ascending Death Year") {
+                        data.sort((a, b) => {
+                            return d3.ascending(a.death_year, b.death_year)
+                        })
+                    } else if (selected == "Descending Death Year") {
+                        data.sort((a, b) => {
+                            return d3.descending(a.death_year, b.death_year)
+                        })
+                    } else if (selected == "Ascending Lifespan") {
+                        data.sort((a, b) => {
+                            return d3.ascending(a.lifespan, b.lifespan)
+                        })
+                    } else if (selected == "Descending Lifespan") {
+                        data.sort((a, b) => {
+                            return d3.descending(a.lifespan, b.lifespan)
+                        })
+                    }
+                    createChronology();
+                })
+
+
+
+                // sort data based on dropdown selection
+                var allData = data;
+                d3.select("#filter-selection").on("change", function () {
+                    var selected = d3.select(this).node().value;
+                    if (selected == "All Authors") {
+                        data = allData;
+                    }
+                    else if (selected == "Authors With Links") {
+                        data = allData.filter((d) => {
+                            return d["Item URI"].trim() !== "";
+                        })
+                    }
+                    else if (selected == "Authors With Images") {
+                        data = allData.filter((d) => {
+                            return d["file"].trim() !== "";
+                        })
+                    }
+                    else if (selected == "Authors With Links and Images") {
+                        data = allData.filter((d) => {
+                            return d["Item URI"].trim() !== "" && d["file"].trim() !== "";
+                        })
+                    }
+                    createChronology();
+                })
+
+                function createChronology() {
+                    var count = d3.select("#count")
+                        .html(`<strong>Number of Entries</strong>: ${data.length}`)
+                    // use tableu 10 color scheme
+                    var colors = {
+                        "1700-1800": "#e0585b",
+                        "1800-1900": "#f18f3b",
+                        "1900-2000": "#4e79a5",
+                        // "1900-1950": "#85b6b2",
+                        // "1950-2000": "#f1a2a9"
+                    };
+
+                    // create base viz
+                    var margins = { top: 64, left: 64, bottom: 64, right: 64 }
+                    var width = window.innerWidth;
+                    var height = window.innerHeight - 128;
+                    var innerWidth = width - margins.left - margins.right;
+                    var innerHeight = height - margins.top - margins.bottom;
+
+                    var chronology = document.createElement("div");
+                    var svg = d3.select(chronology)
+                        .append("svg")
+                        .attr("width", width)
+                        .attr("height", innerHeight)
+                        .call(zoom);
+
+                    // create top and bottom year axes
+                    var x = d3.scaleTime()
+                        .domain([d3.min(data, function (d) { return d.birth_year; }), d3.max(data, function (d) { return d.death_year; })])
+                        .range([0, innerWidth]);
+
+                    var y = d3.scaleBand()
+                        .domain(data.map(function (d) { return d["Dublin Core:Title"]; }))
+                        .range([0, innerHeight])
+                        .padding(0.1);
+
+                    var topAxis = d3.select("#top-axis")
+                        .attr("width", width)
+                        .attr("height", margins.top);
+
+                    topAxis.append("g")
+                        .attr("transform", `translate(${margins.left}, ${margins.top})`)
+                        .call(d3.axisTop(x))
+                        .selectAll("text")
+                        .style("font-family", "Crimson Text, serif")
+                        .style("font-size", ".75rem");
+
+                    var bottomAxis = d3.select("#bottom-axis")
+                        .attr("width", width)
+                        .attr("height", margins.bottom);
+
+                    bottomAxis.append("g")
+                        .attr("transform", `translate(${margins.left}, 0)`)
+                        .call(d3.axisBottom(x))
+                        .selectAll("text")
+                        .style("font-family", "Crimson Text, serif")
+                        .style("font-size", ".75rem");
+
+                    var tooltip = d3.select(".tooltip");
+
+                    // create a line to help with comparing the bars to the axes
+                    var line = svg.append("line")
+                        .attr("class", "line")
+                        .style("stroke", "black")
+                        .style("stroke-width", 1)
+                        .style("opacity", .2)
+                    svg.on("mousemove", function (event) {
+                        var mouseX = d3.pointer(event)[0];
+                        line
+                            .attr("x1", mouseX)
+                            .attr("y1", 0)
+                            .attr("x2", mouseX)
+                            .attr("y2", height);
+                    });
+
+                    // add a bar for each author and make it span their birth to death year
+                    svg.selectAll(".author")
+                        .data(data)
+                        .enter().append("rect")
+                        .attr("class", "author")
+                        .attr("x", function (d) { return x(d.birth_year) + margins.left; })
+                        .attr("y", function (d, i) { return y(d["Dublin Core:Title"]); })
+                        .attr("width", function (d) { return x(d.death_year) - x(d.birth_year); })
+                        .attr("height", y.bandwidth())
+                        .attr("fill", function (d) {
+                            var birth = d.birth_year.getFullYear();
+                            if (birth >= 1700 && birth < 1800) {
+                                return colors["1700-1800"];
+                            } else if (birth >= 1800 && birth < 1900) {
+                                return colors["1800-1900"];
+                            } else if (birth >= 1900 && birth < 2000) {
+                                return colors["1900-2000"];
+                            } else {
+                                return "#000000";
+                            }
+                        })
+                        .each(function (d) {
+                            if (d["Item URI"]) {
+                                d3.select(this).style("cursor", "pointer");
+                            }
+                        })
+                        // open author page on click
+                        .on("click", function (event, d) {
+                            if (d["Item URI"]) {
+                                window.open(d["Item URI"], "_blank");
+                            }
+                        })
+                        // add a tooltip with author info on hover
+                        .on("mouseover", function (event, d) {
+                            tooltip.transition()
+                                .duration(200)
+                                .style("opacity", 1);
+
+                            // display data if it exists
+                            var tooltipHTML = "";
+                            if (d["file"]) {
+                                if (csv === "authors.csv") {
+                                    tooltipHTML += `<img src="./images/${d["file"]}" width="200" alt="Photograph of Alabama author, ${d["Dublin Core:Title"]}"><br><br>`;
+                                }
+                                else if (csv === "export.csv") {
+                                    var photos = d["file"].split(",");
+                                    tooltipHTML += `<img src="${photos[photos.length - 1]}" width="200" alt="Photograph of Alabama author, ${d["Dublin Core:Title"]}"><br><br>`;
+                                }
+                            }
+                            tooltipHTML += `<strong>${d["Dublin Core:Title"]} (${d["Dublin Core:Date"]})</strong><br>`;
+                            if (d.lifespan) {
+                                tooltipHTML += `Years Lived: ${d.lifespan}<br>`;
+                            }
+
+                            // adjust the tooltip position to show above or below cursor depending on position on the screen
+                            var tooltipWidth = tooltip.node().getBoundingClientRect().width;
+                            var tooltipHeight = tooltip.node().getBoundingClientRect().height;
+                            var xPosition = event.pageX - tooltipWidth / 2;
+                            var yPosition = event.pageY - tooltipHeight - 16;
+
+                            if (event.pageY < window.innerHeight / 1.9) {
+                                yPosition = event.pageY + 16;
+                            }
+
+                            tooltip.html(tooltipHTML)
+                                .style("left", xPosition + "px")
+                                .style("top", yPosition + "px");
+
+                            d3.select(this).attr("opacity", 0.7);
+                        })
+                        .on("mouseout", function (d) {
+                            tooltip.transition()
+                                .duration(500)
+                                .style("opacity", 0);
+                            d3.select(this).attr("opacity", 1);
+                        });
+
+                    // create new viz when a sort option is selected
+                    var newChronology = document.getElementById("chronology");
+                    while (newChronology.firstChild) {
+                        newChronology.firstChild.remove();
+                    }
+                    newChronology.appendChild(chronology);
+                    d3.select("#top-axis").call(d3.axisTop(x));
+                    d3.select("#bottom-axis").call(d3.axisBottom(x));
+
+                    // make the viz zoomable
+                    function zoom(svg) {
+                        var extent = [[margins.left, margins.right], [innerWidth - margins.left, innerHeight - margins.top]];
+                        svg.call(d3.zoom()
+                            .scaleExtent([1, 0.1 * data.length])
+                            .translateExtent(extent)
+                            .extent(extent)
+                            .on("zoom", zoomed));
+
+                        function zoomed(event) {
+                            y.range([margins.top, innerHeight - margins.bottom].map(d => event.transform.applyY(d)));
+                            svg.selectAll(".author")
+                                .attr("y", function (d, i) { return y(d["Dublin Core:Title"]); })
+                                .attr("height", y.bandwidth());
+                            svg.select("#top-axis").call(d3.axisTop(y));
+                            svg.select("#bottom-axis").call(d3.axisBottom(y));
+                        }
+                    }
+                }
+            }).catch(function (error) {
+                console.error("error loading csv: " + error);
+            });
+        }
+
+
+
+    </script>
+
+</body>
+
+</html>
