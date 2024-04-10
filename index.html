@@ -10,10 +10,17 @@
     <meta charset="utf-8">
     <title>Zoomable Sunburst Chart with CSV Data</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&display=swap"
+        rel="stylesheet">
 </head>
 
 <style>
-
+    body {
+        font-family: "Crimson Text", serif;
+    }
 </style>
 
 <body>
@@ -95,13 +102,18 @@
                     return author;
                 });
 
+
+
                 const chart = d3.select('#chart')
 
                 const width = 928;
                 const height = width;
                 const radius = width / 6;
 
-                const color = d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, data.children.length + 1));
+                const customColorScale = d3.scaleOrdinal()
+                    .domain(["18th Century", "19th Century", "20th Century"])
+                    .range(["#D97B78", "#e49444", "#8098BC"]);
+
 
                 const hierarchy = d3.hierarchy(data)
                     .sum(d => d.key)
@@ -121,15 +133,28 @@
                     .outerRadius(d => Math.max(d.y0 * radius, d.y1 * radius - 1))
 
                 const svg = chart.append("svg")
-                    .attr("viewBox", [-width / 2, -height / 2, width, width])
-                    .style("font", "10px sans-serif");
+                    .attr("viewBox", [-width / 2, -height / 2, width, width]);
 
                 const path = svg.append("g")
                     .selectAll("path")
                     .data(root.descendants().slice(1))
                     .join("path")
-                    .attr("fill", d => { while (d.depth > 1) d = d.parent; return color(d.data.key); })
-                    .attr("fill-opacity", d => arcVisible(d.current) ? (d.children ? 0.6 : 0.4) : 0)
+                    .attr("fill", d => { while (d.depth > 1) d = d.parent; return customColorScale(d.data.key); })
+                    .attr("fill-opacity", d => {
+                        if (arcVisible(d.current)) {
+                            if (d.children) {
+                                return 1;
+                            } else {
+                                if (d.data.values && d.data.values[0]["Item URI"] !== null) {
+                                    return 0.6;
+                                } else {
+                                    return 0.2;
+                                }
+                            }
+                        } else {
+                            return 0;
+                        }
+                    })
                     .attr("pointer-events", d => arcVisible(d.current) ? "auto" : "none")
 
                     .attr("d", d => arc(d.current));
@@ -146,6 +171,7 @@
                     .text(d => `${d.ancestors().map(d => d.data.key).reverse().join("/")}\n${format(d.key)}`);
 
                 const label = svg.append("g")
+                    .attr("class", "text")
                     .attr("pointer-events", "none")
                     .attr("text-anchor", "middle")
                     .style("user-select", "none")
@@ -153,12 +179,60 @@
                     .data(root.descendants().slice(1))
                     .join("text")
                     .attr("dy", "0.35em")
+                    .attr("tabindex", 0)
+                    .attr("font-size", "0.6em")
                     .attr("fill-opacity", d => +labelVisible(d.current))
                     .attr("transform", d => labelTransform(d.current))
                     .text(d => {
-                        const title = d.data.values ? d.data.values.map(obj => obj["Dublin Core:Title"]).join("\n") : d.data.key;
-                        return `${title}`;
+                        let title = d.data.values ? d.data.values.map(obj => obj["Dublin Core:Title"]).join("\n") : d.data.key;
+                        if (title.trim().length > 20) {
+                            title = title.trim().slice(0, 20) + "...";
+                        }
+                        return title;
                     });
+
+                var currentIndex;
+                const allPaths = path.nodes();
+                const visibleArcs = path.filter(d => arcVisible(d.current)).nodes();
+                const visibleArcIndices = visibleArcs.map(visiblePath => allPaths.indexOf(visiblePath));
+                const visibleLabels = label.filter((d, i) => visibleArcIndices.includes(i)).nodes();
+
+
+                chart.select("svg")
+                    .selectAll("text")
+                    .on("keydown", function (event, d) {
+                        if (event.key === "Tab") {
+                            console.log(visibleLabels, visibleArcs)
+                            currentIndex = visibleLabels.indexOf(document.activeElement);
+
+                            event.preventDefault();
+                            if (event.shiftKey) {
+                                const previousIndex = currentIndex === 0 ? visibleLabels.length - 1 : currentIndex - 1;
+                                visibleLabels[previousIndex].focus();
+                            } else {
+                                const nextIndex = (currentIndex + 1) % visibleLabels.length;
+                                visibleLabels[nextIndex].focus();
+                            }
+                            currentIndex = visibleLabels.indexOf(document.activeElement);
+                            console.log(currentIndex)
+                        }
+
+                        if (event.key === "Enter") {
+                            const pathElement = path.filter((d, i) => i === currentIndex);
+                            if (!pathElement.empty()) {
+                                pathElement.dispatch("click");
+                            }
+                        }
+                    });
+
+
+
+                document.addEventListener("keydown", function (event) {
+                    if (event.key === "Backspace") {
+                        const back = chart.select("circle");
+                        back.dispatch("click");
+                    }
+                });
 
                 const parent = svg.append("circle")
                     .datum(root)
@@ -167,7 +241,12 @@
                     .attr("pointer-events", "all")
                     .on("click", clicked);
 
+
+
+
                 function clicked(event, p) {
+
+
                     parent.datum(p.parent || root);
 
                     root.each(d => d.target = {
@@ -187,17 +266,38 @@
                         .filter(function (d) {
                             return +this.getAttribute("fill-opacity") || arcVisible(d.target);
                         })
-                        .attr("fill-opacity", d => arcVisible(d.target) ? (d.children ? 0.6 : 0.4) : 0)
+                        .attr("fill-opacity", d => {
+                            if (arcVisible(d.target)) {
+                                if (d.children) {
+                                    return 1;
+                                } else {
+                                    if (d.data.values && d.data.values[0]["Item URI"] !== null) {
+                                        return 0.6;
+                                    } else {
+                                        return 0.2;
+                                    }
+                                }
+                            } else {
+                                return 0;
+                            }
+                        })
                         .attr("pointer-events", d => arcVisible(d.target) ? "auto" : "none")
 
                         .attrTween("d", d => () => arc(d.current));
+
+
 
                     label.filter(function (d) {
                         return +this.getAttribute("fill-opacity") || labelVisible(d.target);
                     }).transition(t)
                         .attr("fill-opacity", d => +labelVisible(d.target))
                         .attrTween("transform", d => () => labelTransform(d.current));
+
+
+
                 }
+
+
 
                 function arcVisible(d) {
                     return d.y1 <= 3 && d.y0 >= 1 && d.x1 > d.x0;
