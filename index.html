@@ -10,6 +10,13 @@
     <meta charset="utf-8">
     <title>Zoomable Sunburst Chart with CSV Data</title>
     <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/1.3.2/jspdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+
+
+
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -18,15 +25,183 @@
 </head>
 
 <style>
+    h1 {
+        font-size: 2rem;
+        font-family: "Crimson Text", serif;
+        font-weight: 700;
+        font-style: normal;
+        line-height: 2rem;
+        margin: 0
+    }
+
+
     body {
         font-family: "Crimson Text", serif;
+        padding: 4rem;
+        gap: 4rem;
+        display: flex;
+        flex-direction: column;
+    }
+
+    button {
+        font-family: "Crimson Text", serif;
+        font-weight: 600;
+        font-style: normal;
+        font-size: 1rem;
+        border: 2px solid #000;
+        border-radius: .25rem;
+        background: none;
+        padding: .25rem 1rem;
+        cursor: pointer;
+        transition: all .3s ease;
+        display: flex;
+        align-items: center;
+        flex-direction: row;
+        gap: .5rem;
+    }
+
+    button:hover {
+        background-color: #000;
+        color: #fff;
+    }
+
+
+    .tooltip {
+        position: absolute;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 1rem;
+        background: #fff;
+        border-radius: .5rem;
+        box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
+        pointer-events: none;
+        font-weight: 400;
+        font-style: normal;
+        font-size: 1rem;
+        display: flex;
+        gap: .5rem;
+        flex-direction: column;
+    }
+
+    #custom-menu {
+        display: none;
+        position: absolute;
+        background-color: #fff;
+        font-weight: 600;
+        border-radius: .25rem;
+        padding: 0em;
+        box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
+        z-index: 1000;
+        transition: opacity 0.3s ease;
+        width: auto;
+    }
+
+
+    ul {
+        list-style-type: none;
+        margin: 0;
+        padding: .5em;
+    }
+
+    li {
+        margin: 0;
+        padding: 0;
+    }
+
+
+
+    a {
+        text-decoration: none;
+        color: #000;
+        transition: opacity 0.3s ease;
+        background-color: #fff;
+        display: flex;
+        padding: .25rem 1rem;
+        border-radius: .2rem;
+    }
+
+    a:hover {
+        background-color: #eee;
+    }
+
+    .spinner {
+        width: 1rem;
+        height: 1rem;
+        position: relative;
+        margin: auto;
+        border: 2px solid rgba(0, 0, 0, 0.1);
+        border-left-color: #000;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    #header-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-direction: row;
+        gap: 2rem;
     }
 </style>
 
 <body>
+    <div id="header-container">
+        <h1>Alabama Authors Sunburst</h1>
+        <button tabindex="0" onclick="takeScreenshot()">
+            Export
+            <div id="loadingIndicator" class="spinner" style="display: none;"></div>
+        </button>
+    </div>
+
     <div id="chart"></div>
+    <div class="tooltip" style="opacity: 0;"></div>
+    <div id="custom-menu">
+        <ul>
+            <li><a id="custom-link" href="" target="_blank">Learn more</a></li>
+        </ul>
+    </div>
+
+
+
 
     <script>
+
+
+        function takeScreenshot() {
+            let div = document.getElementById('chart');
+            let loadingIndicator = document.getElementById('loadingIndicator');
+
+            loadingIndicator.style.display = 'block';
+
+            let options = {
+                x: 0,
+                y: 0,
+                width: div.offsetWidth,
+                height: div.offsetHeight
+            };
+
+
+            html2canvas(div, options).then(function (canvas) {
+                loadingIndicator.style.display = 'none';
+
+                let imageDataURL = canvas.toDataURL("image/png");
+
+                let downloadLink = document.createElement("a");
+                downloadLink.href = imageDataURL;
+                downloadLink.download = "sunburst.png";
+
+                downloadLink.click();
+            });
+        }
+
+
         d3.csv("./data/authors.csv").then(function (authorData) {
             d3.csv("./data/books.csv").then(function (bookData) {
 
@@ -134,7 +309,7 @@
 
                 const svg = chart.append("svg")
                     .attr("viewBox", [-width / 2, -height / 2, width, width]);
-
+                var tooltip = d3.select(".tooltip");
                 const path = svg.append("g")
                     .selectAll("path")
                     .data(root.descendants().slice(1))
@@ -156,8 +331,88 @@
                         }
                     })
                     .attr("pointer-events", d => arcVisible(d.current) ? "auto" : "none")
+                    .attr("d", d => arc(d.current))
+                    .on("mouseover", function (event, d) {
+                        console.log(d.data.values)
 
-                    .attr("d", d => arc(d.current));
+
+
+                        // display data if it exists
+                        var tooltipHTML = "";
+                        if (d.data.values[91]["file"]) {
+                            var photos = d.data.values[91]["file"].split(",");
+                            tooltipHTML += `<img src="${photos[photos.length - 1]}" width="200" alt="Photograph of Alabama author, ${d.data.values[41]["Dublin Core:Title"]}">`;
+
+                        }
+                        tooltipHTML += `<strong>${d.data.values[41]["Dublin Core:Title"]} (${d.data.values[47]["Dublin Core:Date"]})</strong>`;
+
+                        // adjust the tooltip position to show above or below cursor depending on position on the screen
+                        var tooltipWidth = tooltip.node().getBoundingClientRect().width;
+                        var tooltipHeight = tooltip.node().getBoundingClientRect().height;
+                        var xPosition = event.pageX - tooltipWidth / 2;
+                        var yPosition = event.pageY - tooltipHeight - 16;
+
+                        if (event.pageY < window.innerHeight / 1.9) {
+                            yPosition = event.pageY + 16;
+                        }
+
+                        tooltip.html(tooltipHTML)
+                            .style("left", xPosition + "px")
+                            .style("top", yPosition + "px");
+                        tooltip.transition()
+                            .duration(200)
+                            .style("opacity", 1);
+                        d3.select(this).attr("opacity", 0.7);
+                    })
+                    .on("mouseout", function (d) {
+
+                        tooltip.transition()
+                            .duration(500)
+                            .style("opacity", 0);
+
+                        d3.select(this).attr("opacity", 1);
+                    })
+                    .on("contextmenu", function (event, d) {
+                        if (d.data.values[0]["Item URI"]) {
+                            event.preventDefault();
+
+                            const customMenu = document.getElementById('custom-menu');
+                            customMenu.style.display = 'block';
+                            customMenu.style.opacity = '100%';
+                            customMenu.style.left = `${event.pageX}px`;
+                            customMenu.style.top = `${event.pageY}px`;
+
+
+                            const customLink = document.getElementById('custom-link');
+                            console.log(d.data.values[0]["Item URI"])
+
+                            customLink.href = d.data.values[0]["Item URI"]
+
+
+
+                            function keepMenuOpen(event) {
+                                event.stopPropagation();
+                            }
+
+                            function hideCustomMenu() {
+                                customMenu.style.opacity = '0%';
+                                customMenu.removeEventListener('mouseleave', hideCustomMenu);
+                                document.removeEventListener('click', hideCustomMenu);
+                                document.removeEventListener('mousemove', keepMenuOpen);
+                            }
+
+                            customMenu.addEventListener('mouseleave', hideCustomMenu);
+
+                            document.addEventListener('click', hideCustomMenu);
+
+                            document.addEventListener('mousemove', keepMenuOpen);
+
+                        }
+                    });
+
+
+
+
 
 
 
