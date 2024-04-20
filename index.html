@@ -333,15 +333,13 @@
                     .attr("pointer-events", d => arcVisible(d.current) ? "auto" : "none")
                     .attr("d", d => arc(d.current))
                     .on("mouseover", function (event, d) {
-                        console.log(d.data.values)
-
 
 
                         // display data if it exists
                         var tooltipHTML = "";
                         if (d.data.values[91]["file"]) {
                             var photos = d.data.values[91]["file"].split(",");
-                            tooltipHTML += `<img src="${photos[photos.length - 1]}" width="200" alt="Photograph of Alabama author, ${d.data.values[41]["Dublin Core:Title"]}">`;
+                            tooltipHTML += `<img src="${photos[photos.length - 1]}" width="200" alt="Photograph of ${d.data.values[41]["Dublin Core:Title"]}">`;
 
                         }
                         tooltipHTML += `<strong>${d.data.values[41]["Dublin Core:Title"]} (${d.data.values[47]["Dublin Core:Date"]})</strong>`;
@@ -363,6 +361,7 @@
                             .duration(200)
                             .style("opacity", 1);
                         d3.select(this).attr("opacity", 0.7);
+
                     })
                     .on("mouseout", function (d) {
 
@@ -422,8 +421,7 @@
                     .on("click", clicked);
 
                 const format = d3.format(",d");
-                path.append("title")
-                    .text(d => `${d.ancestors().map(d => d.data.key).reverse().join("/")}\n${format(d.key)}`);
+
 
                 const label = svg.append("g")
                     .attr("class", "text")
